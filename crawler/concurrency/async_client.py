@@ -5,8 +5,8 @@ from typing import TypeAlias
 import aiohttp
 import bs4
 
-from example_2.logging.init_logging import init_logging
-from example_2.logging.loggers import get_custom_logger
+from crawler.logging.init_logging import init_logging
+from crawler.logging.loggers import get_custom_logger
 
 # # For url parsing.
 # import urllib.parse
@@ -75,4 +75,3 @@ if __name__ == "__main__":
     init_logging()
 
     asyncio.run(main())
-    # asyncio.get_event_loop().run_until_complete(main())
