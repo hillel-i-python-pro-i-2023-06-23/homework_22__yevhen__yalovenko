@@ -113,6 +113,7 @@ async def main():
     urls = [
         "https://example.com/",
         "https://www.djangoproject.com/",
+        "https://pypi.org/",
     ]
     create_table()
 
