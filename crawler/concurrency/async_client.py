@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import deque
 from typing import TypeAlias
 from urllib.parse import urljoin, urlparse
 
@@ -10,18 +11,17 @@ from crawler.logging.loggers import get_custom_logger
 from crawler.services.create_table import create_table
 from crawler.services.db_connection import DBConnection
 
-# # For url parsing.
-# import urllib.parse
-
-
 T_URL: TypeAlias = str
 T_URLS: TypeAlias = list[T_URL]
 T_URLS_AS_SET: TypeAlias = set[T_URL]
 
 T_TEXT: TypeAlias = str
 
+semaphore = asyncio.Semaphore(10)
+
 
 async def get_urls_from_text(text: T_TEXT) -> T_URLS_AS_SET:
+    """Returns the set of references to found in the text"""
     soup = bs4.BeautifulSoup(markup=text, features="html.parser")
 
     urls = set()
@@ -37,20 +37,23 @@ async def make_request(
     session: aiohttp.ClientSession,
     logger: logging.Logger,
 ) -> T_TEXT:
+    """Queries a link and returns text or an empty string"""
     try:
-        async with session.get(url) as response:
-            logger.info(response.status)
-            if response.status == 200:
-                return await response.text()
-            else:
-                logger.error(f"Failed to get {url}: {response.status}")
-                return ""
+        async with semaphore:
+            async with session.get(url) as response:
+                logger.info(response.status)
+                if response.status == 200:
+                    return await response.text()
+                else:
+                    logger.error(f"Failed to get {url}: {response.status}")
+                    return ""
     except Exception as e:
         logger.exception(f"Exception occurred while getting {url}: {e}")
         return ""
 
 
-async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int) -> T_URLS:
+async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int, queue: deque) -> T_URLS:
+    """Processes the link, saves it to the database and returns a list of new links"""
     logger = get_custom_logger(name=url)
 
     if url is None:
@@ -86,17 +89,19 @@ async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int) -> 
     for new_url in new_urls:
         new_url = normalize_url(new_url, base_url)
         if new_url and same_domain(new_url, base_url):
-            await handle_url(new_url, session, depth - 1)
+            queue.append((new_url, depth - 1))
 
     return new_urls
 
 
 def get_base_url(url: T_URL) -> T_URL:
+    """Returns the base link with schema and domain"""
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def normalize_url(url: T_URL, base_url: T_URL) -> T_URL:
+    """Normalizes the link, adding a base link if needed"""
     if url is None:
         return ""
     if url.startswith("http://") or url.startswith("https://"):
@@ -119,7 +124,12 @@ async def main():
 
     depth = 2
 
-    async with aiohttp.ClientSession() as session:
-        tasks = [handle_url(url=url, session=session, depth=depth) for url in urls]
+    queue = deque()
 
-        await asyncio.gather(*tasks)
+    for url in urls:
+        queue.append((url, depth))
+
+    async with aiohttp.ClientSession() as session:
+        while queue:
+            url, depth = queue.popleft()
+            await handle_url(url, session, depth, queue=queue)
