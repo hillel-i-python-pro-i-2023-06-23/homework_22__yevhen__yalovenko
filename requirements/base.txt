@@ -1,6 +1,4 @@
-# Base requirements. These are the only ones that are required to run the app.
-
-# For crawling.
+#For crawling
 aiohttp[speedups]==3.8.6
 
 beautifulsoup4==4.12.2
