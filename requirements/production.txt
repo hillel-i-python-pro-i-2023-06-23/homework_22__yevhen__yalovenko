@@ -1,4 +1,2 @@
-# Pro-tip: Try not to put anything here. Avoid dependencies in
-#	production that aren't in development.
-
+# Requirements for production
 --requirement base.txt
