@@ -4,3 +4,5 @@
 # Exclude
 !crawler
 !requirements
+!run.py
+!requirements.txt

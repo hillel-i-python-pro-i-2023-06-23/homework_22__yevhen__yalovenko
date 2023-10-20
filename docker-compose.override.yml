@@ -3,4 +3,5 @@ version: '3.9'
 
 services:
   app:
-    build: .
+    volumes:
+      - ./db:/wd/db:rw

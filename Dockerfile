@@ -13,12 +13,13 @@ RUN useradd --system ${USER} && \
 RUN apt update && apt upgrade -y
 
 COPY --chown=${USER} requirements.txt requirements.txt
+COPY --chown=${USER} requirements requirements
 
 RUN pip install --upgrade pip && \
-    pip install --requirement requirements.txt
+    pip install --requirement requirements/production.txt
 
+COPY --chown=${USER} ./crawler crawler
 COPY --chown=${USER} ./run.py run.py
-COPY --chown=${USER} ./app app
 
 USER ${USER}
 

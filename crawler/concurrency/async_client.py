@@ -1,12 +1,14 @@
 import asyncio
 import logging
+from pprint import pprint
 from typing import TypeAlias
 
 import aiohttp
 import bs4
 
-from crawler.logging.init_logging import init_logging
 from crawler.logging.loggers import get_custom_logger
+from crawler.services.create_table import create_table
+from crawler.services.db_connection import DBConnection
 
 # # For url parsing.
 # import urllib.parse
@@ -40,14 +42,41 @@ async def make_request(
         return await response.text()
 
 
-async def handle_url(url: T_URL, session: aiohttp.ClientSession) -> T_URLS:
+async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int) -> T_URLS:
     logger = get_custom_logger(name=url)
+
+    if url is None:
+        logger.info(f"Invalid URL: {url}")
+        return []
+
+    if not url.startswith("http://") and not url.startswith("https://"):
+        logger.info(f"Invalid URL: {url}")
+        return []
+
+    with DBConnection() as connection:
+        result = connection.execute("SELECT * FROM urls WHERE url = ?", (url,)).fetchone()
+
+        if result is not None:
+            logger.info(f"URL {url} is already in the database")
+            return []
+
+        if depth == 0:
+            logger.info(f"Reached the maximum depth for URL {url}")
+            return []
+
+        connection.execute("INSERT INTO urls (url) VALUES (?)", (url,))
+        connection.commit()
 
     text = await make_request(url=url, session=session, logger=logger)
 
     urls_as_set = await get_urls_from_text(text=text)
 
-    return list(urls_as_set)
+    new_urls = list(urls_as_set)
+
+    for new_url in new_urls:
+        await handle_url(new_url, session, depth - 1)
+
+    return new_urls
 
 
 async def main():
@@ -55,23 +84,14 @@ async def main():
         "https://example.com/",
         "https://www.djangoproject.com/",
     ]
+    create_table()
 
-    async with aiohttp.ClientSession(
-        # If you need to ignore cookies.
-        # https://docs.aiohttp.org/en/stable/client_reference.html#aiohttp.DummyCookieJar
-        # cookie_jar=aiohttp.DummyCookieJar(),
-    ) as session:
-        tasks = [handle_url(url=url, session=session) for url in urls]
+    depth = 2
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [handle_url(url=url, session=session, depth=depth) for url in urls]
 
         results = await asyncio.gather(*tasks)
 
     for result in results:
-        print(result)
-
-    ...
-
-
-if __name__ == "__main__":
-    init_logging()
-
-    asyncio.run(main())
+        pprint(result)
