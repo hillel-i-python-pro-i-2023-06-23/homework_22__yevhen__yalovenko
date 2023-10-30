@@ -1,11 +1,13 @@
-from crawler.services.db_connection import DBConnection
+import aiosqlite
+
+from crawler.config import DB_PATH
 
 
-def create_table():
-    with DBConnection() as connection:
-        with connection:
-            connection.execute(
-                """
+async def create_table():
+    async with aiosqlite.connect(DB_PATH) as connection:
+        async with connection.execute(
+            """
                 CREATE TABLE IF NOT EXISTS urls (url TEXT PRIMARY KEY)
             """
-            )
+        ):
+            ...
