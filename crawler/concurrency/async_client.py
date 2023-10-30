@@ -5,11 +5,13 @@ from typing import TypeAlias
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
+import aiosqlite
 import bs4
 
+from crawler.config import DB_PATH, URLS, LOGS_PATH
 from crawler.logging.loggers import get_custom_logger
 from crawler.services.create_table import create_table
-from crawler.services.db_connection import DBConnection
+from crawler.services.get_urls_to_print import get_all_urls
 
 T_URL: TypeAlias = str
 T_URLS: TypeAlias = list[T_URL]
@@ -64,8 +66,9 @@ async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int, que
         logger.info(f"Invalid URL: {url}")
         return []
 
-    with DBConnection() as connection:
-        result = connection.execute("SELECT * FROM urls WHERE url = ?", (url,)).fetchone()
+    async with aiosqlite.connect(DB_PATH) as connection:
+        cursor = await connection.execute("SELECT * FROM urls WHERE url = ?", (url,))
+        result = await cursor.fetchone()
 
         if result is not None:
             logger.info(f"URL {url} is already in the database")
@@ -75,8 +78,8 @@ async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int, que
             logger.info(f"Reached the maximum depth for URL {url}")
             return []
 
-        connection.execute("INSERT INTO urls (url) VALUES (?)", (url,))
-        connection.commit()
+        await connection.execute("INSERT INTO urls (url) VALUES (?)", (url,))
+        await connection.commit()
 
     text = await make_request(url=url, session=session, logger=logger)
 
@@ -115,12 +118,8 @@ def same_domain(url: T_URL, base_url: T_URL) -> bool:
 
 
 async def main():
-    urls = [
-        "https://example.com/",
-        "https://www.djangoproject.com/",
-        "https://pypi.org/",
-    ]
-    create_table()
+    urls = URLS
+    await create_table()
 
     depth = 2
 
@@ -129,7 +128,15 @@ async def main():
     for url in urls:
         queue.append((url, depth))
 
+    # record url in the database
     async with aiohttp.ClientSession() as session:
         while queue:
             url, depth = queue.popleft()
-            await handle_url(url, session, depth, queue=queue)
+            await handle_url(url=url, session=session, depth=depth, queue=queue)
+
+    # print all urls in the database to user
+    urls = await get_all_urls()
+    print("The following sites are in the database:")
+    for url in urls:
+        print(url)
+    print(f"Also you can check logs {LOGS_PATH.as_uri()}")

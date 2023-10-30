@@ -5,3 +5,5 @@ services:
   app:
     volumes:
       - ./db:/wd/db:rw
+      - ./logs:/wd/logs:rw
+    user: "${UID}"
