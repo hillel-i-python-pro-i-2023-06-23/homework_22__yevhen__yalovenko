@@ -2,7 +2,7 @@ import asyncio
 import logging
 from collections import deque
 from typing import TypeAlias
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse, urljoin
 
 import aiohttp
 import aiosqlite
@@ -16,14 +16,14 @@ from crawler.services.get_urls_to_print import get_all_urls
 T_URL: TypeAlias = str
 T_URLS: TypeAlias = list[T_URL]
 T_URLS_AS_SET: TypeAlias = set[T_URL]
-
 T_TEXT: TypeAlias = str
+
+BATCH_SIZE = 10
 
 semaphore = asyncio.Semaphore(10)
 
 
 async def get_urls_from_text(text: T_TEXT) -> T_URLS_AS_SET:
-    """Returns the set of references to found in the text"""
     soup = bs4.BeautifulSoup(markup=text, features="html.parser")
 
     urls = set()
@@ -39,7 +39,6 @@ async def make_request(
     session: aiohttp.ClientSession,
     logger: logging.Logger,
 ) -> T_TEXT:
-    """Queries a link and returns text or an empty string"""
     try:
         async with semaphore:
             async with session.get(url) as response:
@@ -55,7 +54,6 @@ async def make_request(
 
 
 async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int, queue: deque) -> T_URLS:
-    """Processes the link, saves it to the database and returns a list of new links"""
     logger = get_custom_logger(name=url)
 
     if url is None:
@@ -78,7 +76,7 @@ async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int, que
             logger.info(f"Reached the maximum depth for URL {url}")
             return []
 
-        await connection.execute("INSERT INTO urls (url) VALUES (?)", (url,))
+        await connection.execute("INSERT OR IGNORE INTO urls (url) VALUES (?)", (url,))
         await connection.commit()
 
     text = await make_request(url=url, session=session, logger=logger)
@@ -98,13 +96,11 @@ async def handle_url(url: T_URL, session: aiohttp.ClientSession, depth: int, que
 
 
 def get_base_url(url: T_URL) -> T_URL:
-    """Returns the base link with schema and domain"""
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def normalize_url(url: T_URL, base_url: T_URL) -> T_URL:
-    """Normalizes the link, adding a base link if needed"""
     if url is None:
         return ""
     if url.startswith("http://") or url.startswith("https://"):
@@ -128,13 +124,15 @@ async def main():
     for url in urls:
         queue.append((url, depth))
 
-    # record url in the database
     async with aiohttp.ClientSession() as session:
         while queue:
-            url, depth = queue.popleft()
-            await handle_url(url=url, session=session, depth=depth, queue=queue)
+            tasks = []
+            for _ in range(BATCH_SIZE):
+                if queue:
+                    url, depth = queue.popleft()
+                    tasks.append(handle_url(url=url, session=session, depth=depth, queue=queue))
+            await asyncio.gather(*tasks)
 
-    # print all urls in the database to user
     urls = await get_all_urls()
     print("The following sites are in the database:")
     for url in urls:
